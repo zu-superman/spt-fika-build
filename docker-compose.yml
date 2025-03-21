@@ -1,0 +1,13 @@
+version: "3.8"
+
+services:
+  fika:
+    image: ghcr.nju.edu.cn/zu-superman/fika-alpine:3.10.5
+    container_name: fika
+    ports:
+      - 26968:6969
+    restart: unless-stopped
+    volumes:
+      - ./aki-server:/fika
+      - /etc/localtime:/etc/localtime:ro
+    tty: true
