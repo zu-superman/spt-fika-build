@@ -72,8 +72,9 @@ jobs:
         id: versions
         shell: bash
         run: |
-          apt update && apt install -y jq
+          sudo apt update && sudo apt install -y jq
           rm -rf /workspace/Build/spt-server
+          sudo mkdir -p /workspace/Build && sudo chown -R `whoami`:`groups | awk '{print $1}'` /workspace
           git init /workspace/Build/spt-server
           cd /workspace/Build/spt-server
           git remote add origin ${{ steps.check-existence.outputs.repo_spt }}
