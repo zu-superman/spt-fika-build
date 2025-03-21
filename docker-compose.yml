@@ -8,6 +8,7 @@ services:
       - 26968:6969
     restart: unless-stopped
     volumes:
-      - ./aki-server:/fika
+      - ./aki-server/logs:/fika/logs
+      - ./aki-server/profiles:/fika/user/profiles
       - /etc/localtime:/etc/localtime:ro
     tty: true
