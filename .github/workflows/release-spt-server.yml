@@ -40,10 +40,10 @@ jobs:
 
           declare -A REPOS_TAG
 
-          REPOS_TAG[$SPTREPO]=$SPTBUILDTAG
-          REPOS_TAG[$FIKAREPO]=$FIKABUILDTAG
+          REPOS_TAG[$SPTREPO]="$SPTBUILDTAG"
+          REPOS_TAG[$FIKAREPO]="$FIKABUILDTAG"
           
-          for REPO in "${REPOS_TAG[@]}"; do
+          for REPO in "${!REPOS_TAG[@]}"; do
             echo "Checking for tag $TAG in $REPO..."
             TAG=${REPOS_TAG[$REPO]}
             if ! git ls-remote --tags $REPO $TAG | grep -q $TAG; then
