@@ -28,8 +28,7 @@ jobs:
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
-          SPTREPO: "https://github.com/zu-superman/spt-server.git"
-          FIKAREPO: "https://github.com/zu-superman/Fika-Server.git"
+          SPT_SERVER_REPO: "https://github.com/zu-superman/spt-server-csharp.git"
           SPTBUILDTAG: ${{ github.event.inputs.sptBuildTag }}
           FIKABUILDTAG: ${{ github.event.inputs.fikaBuildTag }}
         run: |
@@ -40,7 +39,7 @@ jobs:
 
           declare -A REPOS_TAG
 
-          REPOS_TAG[$SPTREPO]="$SPTBUILDTAG"
+          REPOS_TAG[$SPT_SERVER_REPO]="$SPTBUILDTAG"
           REPOS_TAG[$FIKAREPO]="$FIKABUILDTAG"
           
           for REPO in "${!REPOS_TAG[@]}"; do
@@ -55,8 +54,7 @@ jobs:
           echo "proceed=$PROCEED" >> $GITHUB_OUTPUT
 
           if [ "$PROCEED" = "true" ]; then
-            echo "repo_spt=$SPTREPO" >> $GITHUB_OUTPUT
-            echo "repo_fika=$FIKAREPO" >> $GITHUB_OUTPUT
+            echo "repo_spt=$SPT_SERVER_REPO" >> $GITHUB_OUTPUT
             echo "tag_spt=$SPTBUILDTAG" >> $GITHUB_OUTPUT
             echo "tag_fika=$FIKABUILDTAG" >> $GITHUB_OUTPUT
           fi
@@ -93,10 +91,11 @@ jobs:
     needs: prepare
     if: needs.prepare.outputs.proceed == 'true'
     runs-on: ubuntu-latest
+    container:
+      image: refringe/spt-build-dotnet:2.1.0
     outputs:
       spt_server_version: ${{ steps.clone-spt-server.outputs.spt_version }}
       spt_server_commit: ${{ steps.commit-hash.outputs.sp }}
-      node_version: ${{ steps.extract-node-version.outputs.node_version }}
     steps:
       - name: Install Git LFS
         run: |
@@ -134,36 +133,27 @@ jobs:
         run: echo "spt_server_commit=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
         working-directory: /workspace/build/spt-server
 
-      - name: Extract Node.js version
-        id: extract-node-version
-        env:
-          node_version: ""
+      - name: Pull LFS Files
         run: |
-          node_version=$(cat /workspace/build/spt-server/project/.nvmrc)
-
-          if [ -z "$node_version" ]; then
-            echo "Error: Could't extract Node.js version."
-            exit 1
-          fi
-          echo "The node version required by spt server is: ${node-version}"
-          echo "node_version=$node_version" >> "$GITHUB_OUTPUT"
-
-      - name: Set up Node.js environment
-        uses: actions/setup-node@v4
-        with:
-          node-version: "${{ steps.extract-node-version.outputs.node_version }}"
-
-      - name: Install dependencies
-        run: npm install
-        working-directory: /workspace/build/spt-server/project
-
+          git lfs pull 
+        working-directory: /workspace/build/spt-server
+      
       - name: Build Spt Server
         shell: bash
         run: |
-          sed -i 's@127.0.0.1@0.0.0.0@g' ./assets/configs/http.json
-          sed -i 's@SPT.Server.exe@server@g' ./gulpfile.mjs
-          sed -i 's@const buildDir = "build/";@const buildDir = "target/";@g' ./gulpfile.mjs
-          npm run build:release --arch=x64 --platform=linux/amd64
+          sed -i 's@127.0.0.1@0.0.0.0@g' ./Libraries/SPTarkov.Server.Assets/SPT_Data/configs/http.json
+          dotnet publish -f net9.0 ./SPTarkov.Server/SPTarkov.Server.csproj \
+          -c Release \
+          -r linux-x64 \
+          --self-contained false \
+          -p:SptBuildType=RELEASE \
+          -p:SptVersion=${{ needs.prepare.outputs.spt_version }} \
+          -p:SptBuildTime=$( date +%Y%m%d )
+          -p:SptBuildCommit=${{ needs.prepare.outputs.spt_server_commit }}
+          -p:IsPublish=true
+          
+          mkdir -p /workspace/build/spt-server/project/target
+          tar -cf - -C ./SPTarkov.Server/bin/Release/net9.0/linux-x64/publish --exclude='*.pdb' . | tar -xf - -C /workspace/build/spt-server/project/target
         working-directory: /workspace/build/spt-server/project
 
       - name: Upload SPT Server Artifact
