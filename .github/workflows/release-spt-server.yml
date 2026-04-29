@@ -304,23 +304,29 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: spt-server-artifact
-          path: ${{ github.workspace }}/release/aki-server
+          path: ${{ github.workspace }}/release/SPT
 
       - name: Download Fika Server Artifact
         uses: actions/download-artifact@v4
         with:
           name: fika-server-artifact
-          path: ${{ github.workspace }}/release/aki-server
+          path: ${{ github.workspace }}/release/SPT
+
+      - name: Download Fika Plugin Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: fika-plugin-artifact
+          path: ${{ github.workspace }}/release/SPT
 
       - name: Check artifacts isExist
         id: check_artifact
         shell: bash
         run: |
-          if [ ! -d "${{ github.workspace }}/release/aki-server" ] || [ ! -d "${{ github.workspace }}/release/aki-server/user" ]; then
+          if [ ! -d "${{ github.workspace }}/release/SPT" ] || [ ! -d "${{ github.workspace }}/release/SPT/user" ]; then
             echo "Error: Artifact not found."
             exit 1
           fi
-          ls -alhF ${{ github.workspace }}/release/aki-server
+          ls -alhF ${{ github.workspace }}/release/SPT
 
       - name: Build Docker image
         run: |
@@ -331,15 +337,15 @@ jobs:
           #!/bin/sh
           mkdir -p /fika/logs
           cd /fika
-          /fika/server | awk '{ print strftime("%Y-%m-%d %H:%M:%S"), \$0; fflush(); }' | tee -a /fika/logs/fika.log
+          /fika/SPT.Server.Linux | ts "%Y-%m-%d %H:%M:%S" | tee -a /fika/logs/fika.log
           EOF
-          chmod +x ./aki-server/server fika-start
+          chmod +x ./SPT/SPT.Server.Linux fika-start
 
           # create Dockerfile
           cat <<EOF > Dockerfile
-          FROM alpine:latest
-          RUN apk update && apk add libstdc++ libgcc gcompat
-          COPY ./aki-server /fika
+          FROM mcr.microsoft.com/dotnet/aspnet:9.0
+          RUN apt update && apt install -y moreutils
+          COPY ./SPT /fika
           COPY fika-start /bin/fika-start
           CMD ["/bin/fika-start"]
           EOF
@@ -362,17 +368,14 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/spt-with-fika:latest
             ghcr.io/${{ github.repository_owner }}/spt-with-fika:${{ needs.build-spt.outputs.spt_server_version }}
-            ghcr.io/${{ github.repository_owner }}/fika-alpine:latest
-            ghcr.io/${{ github.repository_owner }}/fika-alpine:${{ needs.build-spt.outputs.spt_server_version }}
-          build-args: |
-            NODE_ENV=production
+            ghcr.io/${{ github.repository_owner }}/fika-debian12:latest
+            ghcr.io/${{ github.repository_owner }}/fika-debian12:${{ needs.build-spt.outputs.spt_server_version }}
 
       - name: Compress Build Artifact
         id: compress_artifact
         run: |
-          cd ${{ github.workspace }}/release/aki-server
-          artifact_name=spt-v${{ needs.build-spt.outputs.spt_server_version }}-fika-${{ needs.build-fika.outputs.fika_server_version }}.tar.gz
-          tar -czvf ${{ github.workspace }}/release/$artifact_name .
+          artifact_name=spt-${{ needs.build-spt.outputs.spt_server_version }}-fika-${{ needs.build-fika.outputs.fika_server_version }}.tgz
+          tar -czvf ${{ github.workspace }}/release/$artifact_name ./SPT
 
           echo "artifact_name=$artifact_name" >> "$GITHUB_OUTPUT"
       
@@ -404,6 +407,6 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}  # get upload url from step `create_release`
           asset_path: ${{ github.workspace }}/release/${{ steps.compress_artifact.outputs.artifact_name }}  # upload artifact
-          asset_name: ${{ steps.compress_artifact.outputs.artifact_name }}.tar.gz
+          asset_name: ${{ steps.compress_artifact.outputs.artifact_name }}
           asset_content_type: application/gzip
 
