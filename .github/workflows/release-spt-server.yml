@@ -18,7 +18,8 @@ jobs:
     outputs:
       proceed: ${{ steps.check-existence.outputs.proceed }}
       repo_spt: ${{ steps.check-existence.outputs.repo_spt }}
-      repo_fika: ${{ steps.check-existence.outputs.repo_fika }}
+      repo_fika_server: ${{ steps.check-existence.outputs.repo_fika_server }}
+      repo_fika_plugin: ${{ steps.check-existence.outputs.repo_fika_plugin }}
       tag_spt: ${{ steps.check-existence.outputs.tag_spt }}
       tag_fika: ${{ steps.check-existence.outputs.tag_fika }}
       spt_version: ${{ steps.versions.outputs.spt_version }}
@@ -29,6 +30,8 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           SPT_SERVER_REPO: "https://github.com/zu-superman/spt-server-csharp.git"
+          FIKA_SERVER_REPO: "https://github.com/zu-superman/Fika-Server-Csharp.git"
+          FIKA_PLUGIN_REPO: "https://github.com/zu-superman/Fika-Plugin.git"
           SPTBUILDTAG: ${{ github.event.inputs.sptBuildTag }}
           FIKABUILDTAG: ${{ github.event.inputs.fikaBuildTag }}
         run: |
@@ -40,7 +43,7 @@ jobs:
           declare -A REPOS_TAG
 
           REPOS_TAG[$SPT_SERVER_REPO]="$SPTBUILDTAG"
-          REPOS_TAG[$FIKAREPO]="$FIKABUILDTAG"
+          REPOS_TAG[$FIKA_SERVER_REPO]="$FIKABUILDTAG"
           
           for REPO in "${!REPOS_TAG[@]}"; do
             echo "Checking for tag $TAG in $REPO..."
@@ -55,6 +58,8 @@ jobs:
 
           if [ "$PROCEED" = "true" ]; then
             echo "repo_spt=$SPT_SERVER_REPO" >> $GITHUB_OUTPUT
+            echo "repo_fika_server=$FIKA_SERVER_REPO" >> $GITHUB_OUTPUT
+            echo "repo_fika_plugin=$FIKA_PLUGIN_REPO" >> $GITHUB_OUTPUT
             echo "tag_spt=$SPTBUILDTAG" >> $GITHUB_OUTPUT
             echo "tag_fika=$FIKABUILDTAG" >> $GITHUB_OUTPUT
           fi
@@ -169,75 +174,114 @@ jobs:
     if: needs.prepare.outputs.proceed == 'true'
     runs-on: ubuntu-latest
     outputs:
-      fika_server_version: ${{ steps.clone-fika-server.outputs.fika_server_version }}
+      fika_server_version: ${{ steps.clone-fika-server-and-plugin.outputs.fika_server_version }}
+      fika_plugin_version: ${{ steps.clone-fika-server-and-plugin.outputs.fika_plugin_version }}
       fika_server_commit: ${{ steps.commit-hash.outputs.fika_server_commit }}
-      node_version: ${{ steps.extract-node-version.outputs.node_version }}
+      fika_plugin_commit: ${{ steps.commit-hash.outputs.fika_plugin_commit }}
     steps:
-      - name: Clone Fika Server
-        id: clone-fika-server
+      - name: Clone Fika Server And Plugin
+        id: clone-fika-server-and-plugin
         shell: bash
         run: |
-          serverPath="/workspace/build/fika-server"
+          serverPath="/workspace/build/fika/server"
+          pluginPath="/workspace/build/fika/plugin"
 
           # Delete old remnants of the last build.
           if [ -d "$serverPath" ]; then
               rm -rf "$serverPath"
           fi
           sudo mkdir -p $serverPath
-          sudo chown -R `whoami`:`groups | awk '{print $1}'` $serverPath
+
+          if [ -d "$pluginPath" ]; then
+              rm -rf "$pluginPath"
+          fi
+          sudo mkdir -p $pluginPath
+
+          sudo chown -R `whoami`:`groups | awk '{print $1}'` $serverPath $pluginPath
 
           TARGET="${{ needs.prepare.outputs.tag_fika }}"
 
           echo "Cloning target: $TARGET"
-          git clone ${{ needs.prepare.outputs.repo_fika }} --branch "$TARGET" --depth 1 "$serverPath"
+          git clone ${{ needs.prepare.outputs.repo_fika_server }} --branch "$TARGET" --depth 1 "$serverPath"
+          git clone ${{ needs.prepare.outputs.repo_fika_plugin }} --branch "$TARGET" --depth 1 "$pluginPath"
+
           echo "fika_server_version=${{ needs.prepare.outputs.tag_fika }}" >> "$GITHUB_OUTPUT"
+          echo "fika_plugin_version=${{ needs.prepare.outputs.tag_fika }}" >> "$GITHUB_OUTPUT"
 
       - name: Output Commit Hash
         id: commit-hash
         shell: bash
-        run: echo "fika_server_commit=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-        working-directory: /workspace/build/fika-server
-
-      - name: Extract Node.js version
-        id: extract-node-version
-        env:
-          node_version: ""
         run: |
-          sudo apt update && sudo apt install -y jq
-          cd /workspace/build/fika-server
-          node_version=$(jq -r '.devDependencies["@types/node"]' package.json)
+          echo "fika_server_commit=$(git -C ./server rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          echo "fika_plugin_commit=$(git -C ./plugin rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+        working-directory: /workspace/build/fika
 
-          if [ -z "$node_version" ]; then
-            echo "Error: Node.js version not found in package.json"
-            exit 1
-          fi
-          echo "The node version required by fika server is: ${node_version}"
-          echo "node_version=$node_version" >> "$GITHUB_OUTPUT"
-
-      - name: Setup Node.js environment
-        uses: actions/setup-node@v4
+      - name: Set up .NET For Fika Server
+        uses: actions/setup-dotnet@v4
         with:
-          node-version: ${{ steps.extract-node-version.outputs.node_version }}
+          dotnet-version: '9.0.x'
+          cache: true
+          cache-dependency-path: '/workspace/build/fika/server/FikaServer/packages.lock.json'
 
-      - name: Install dependencies
-        run: npm install
-        working-directory: /workspace/build/fika-server
-
+      - name: Restore Fika Server
+        run: |
+          cd /workspace/build/fika/server
+          dotnet restore FikaServer.slnx
+          
       - name: Build Fika Server
         shell: bash
         run: |
-          sudo apt update && sudo apt install -y unzip
-          npm run build
-          unzip dist/fika-server.zip -d dist
-          mkdir -p target
-          mv dist/user target/user
-        working-directory: /workspace/build/fika-server
-  
+          dotnet publish FikaServer/FikaServer.csproj --configuration Release --no-restore --output output/
+          target_path='target/SPT/user/mods/fika-server'
+          mkdir -p ${target_path}
+          cp output/FikaServer.dll ${target_path}/
+          cp output/FikaShared.dll ${target_path}/
+          cp -r FikaServer/Assets ${target_path}/assets
+          cp Licenses/* ${target_path}/
+        working-directory: /workspace/build/fika/server
+
       - name: Upload Fika Server Artifact
         uses: actions/upload-artifact@v4
         with:
           name: fika-server-artifact
-          path: /workspace/build/fika-server/target
+          path: /workspace/build/fika/server/target
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Set up .NET For Fika Plugin
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+          cache: true
+          cache-dependency-path: '/workspace/build/fika/plugin/Fika.Core/packages.lock.json'
+
+      - name: Restore Fika Plugin
+        run: |
+          cd /workspace/build/fika/plugin
+          dotnet restore Fika-Plugin.slnx
+  
+      - name: Build Fika Plugin
+        shell: bash
+        run: |
+          dotnet build Fika.Core/Fika.Core.csproj \
+            --configuration Release \
+            --no-restore \
+            --output output/ \
+            -p:Version=${{ needs.build-fika.outputs.fika_plugin_version }} \
+            -p:AssemblyVersion=${{ needs.build-fika.outputs.fika_plugin_version }} \
+            -p:InformationalVersion=${{ needs.build-fika.outputs.fika_plugin_version }}
+          
+          target_path='target/BepInEx/plugins/Fika'
+          mkdir -p ${target_path}
+          cp output/Fika.Core.dll ${target_path}/
+          cp Licenses/* ${target_path}/
+        working-directory: /workspace/build/fika/plugin
+
+      - name: Upload Fika Plugin Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fika-plugin-artifact
+          path: /workspace/build/fika/plugin/target
           retention-days: 1
           if-no-files-found: error
     
