@@ -86,7 +86,7 @@ jobs:
 
           # 配置仓库, 启用稀疏检出, 避免为了获取内部版本号而需要下载整个仓库
           git config core.sparseCheckout true
-          echo "./Build.props" >> .git/info/sparse-checkout
+          echo "Build.props" >> .git/info/sparse-checkout
 
           git fetch --depth=1 origin "${{ steps.check-existence.outputs.tag_spt }}"
           git checkout FETCH_HEAD
