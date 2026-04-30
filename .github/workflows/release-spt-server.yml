@@ -75,19 +75,24 @@ jobs:
         id: versions
         shell: bash
         run: |
-          sudo apt update && sudo apt install -y jq
+          # 初始化工作区
           rm -rf /workspace/build/spt-server
           sudo mkdir -p /workspace/build && sudo chown -R `whoami`:`groups | awk '{print $1}'` /workspace
+          
+          # 初始化仓库
           git init /workspace/build/spt-server
           cd /workspace/build/spt-server
           git remote add origin ${{ steps.check-existence.outputs.repo_spt }}
+
+          # 配置仓库, 启用稀疏检出, 避免为了获取内部版本号而需要下载整个仓库
           git config core.sparseCheckout true
-          echo "project/assets/configs/core.json" >> .git/info/sparse-checkout
+          echo "./Build.props" >> .git/info/sparse-checkout
+
           git fetch --depth=1 origin "${{ steps.check-existence.outputs.tag_spt }}"
           git checkout FETCH_HEAD
 
-          cd project/assets/configs
-          SPT_VERSION=$(jq -r '.sptVersion' core.json)
+          # 获取 SPT 内部版本
+          SPT_VERSION=$(sed -n 's/.*<SptVersion[^>]*>\([0-9]\+\.[0-9]\+\.[0-9]\+\)<\/SptVersion>.*/\1/p' Build.props)
 
           echo "spt_version=$SPT_VERSION" >> $GITHUB_OUTPUT
           echo "SPT version is $SPT_VERSION"
