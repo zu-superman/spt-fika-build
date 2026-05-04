@@ -121,8 +121,11 @@ jobs:
           repository: ${{ needs.prepare.outputs.repo_spt }}
           ref: ${{ needs.prepare.outputs.tag_spt }}
           path: ${{ needs.prepare.outputs.build_path_spt }}
-          lfs: true
-      
+
+      - name: Pull SPT LFS
+        run: |
+          git lfs pull
+        working-directory: ${{ needs.prepare.outputs.build_path_spt }}
       - name: Build Spt Server
         shell: bash
         run: |
