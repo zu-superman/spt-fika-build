@@ -136,8 +136,8 @@ jobs:
           --self-contained false \
           -p:SptBuildType=RELEASE \
           -p:SptVersion=${{ needs.prepare.outputs.spt_version }} \
-          -p:SptBuildTime=$( date +%Y%m%d )
-          -p:SptBuildCommit=${{ needs.prepare.outputs.spt_commit }}
+          -p:SptBuildTime=$( date +%Y%m%d ) \
+          -p:SptBuildCommit=${{ needs.prepare.outputs.spt_commit }} \
           -p:IsPublish=true
           
           mkdir -p ./target
