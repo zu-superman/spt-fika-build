@@ -34,9 +34,9 @@ jobs:
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
-          SPT_SERVER_REPO: "https://github.com/sp-tarkov/server-csharp.git"
-          FIKA_SERVER_REPO: "https://github.com/project-fika/Fika-Server-CSharp.git"
-          FIKA_PLUGIN_REPO: "https://github.com/project-fika/Fika-Plugin.git"
+          SPT_SERVER_REPO: "sp-tarkov/server-csharp"
+          FIKA_SERVER_REPO: "project-fika/Fika-Server-CSharp"
+          FIKA_PLUGIN_REPO: "project-fika/Fika-Plugin"
           SPTBUILDTAG: ${{ github.event.inputs.sptBuildTag }}
           FIKABUILDTAG: ${{ github.event.inputs.fikaBuildTag }}
         run: |
@@ -53,7 +53,7 @@ jobs:
           for REPO in "${!REPOS_TAG[@]}"; do
             echo "Checking for tag $TAG in $REPO..."
             TAG=${REPOS_TAG[$REPO]}
-            if ! git ls-remote --tags $REPO $TAG | grep -q $TAG; then
+            if ! git ls-remote --tags "https://github.com/${REPO}.git" $TAG | grep -q $TAG; then
               echo "Tag $TAG not found in $REPO"
               PROCEED="false"
               break
@@ -87,7 +87,7 @@ jobs:
           # 初始化仓库
           git init ${{ github.workspace }}/build/spt-server
           cd ${{ github.workspace }}/build/spt-server
-          git remote add origin ${{ steps.check-existence.outputs.repo_spt }}
+          git remote add origin "https://github.com/${{ steps.check-existence.outputs.repo_spt }}.git"
 
           # 配置仓库, 启用稀疏检出, 避免为了获取内部版本号而需要下载整个仓库
           git config core.sparseCheckout true
