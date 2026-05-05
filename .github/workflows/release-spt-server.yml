@@ -112,6 +112,8 @@ jobs:
     needs: prepare
     if: needs.prepare.outputs.proceed == 'true'
     runs-on: ubuntu-latest
+    outputs:
+      spt_version: ${{ needs.prepare.outputs.spt_version }}
     container:
       image: refringe/spt-build-dotnet:2.1.0
     steps:
@@ -348,14 +350,14 @@ jobs:
           push: true
           tags: |
             ghcr.io/${{ github.repository_owner }}/spt-with-fika:latest
-            ghcr.io/${{ github.repository_owner }}/spt-with-fika:${{ needs.prepare.outputs.spt_version }}
+            ghcr.io/${{ github.repository_owner }}/spt-with-fika:${{ needs.build-spt.outputs.spt_version }}
             ghcr.io/${{ github.repository_owner }}/fika-debian12:latest
-            ghcr.io/${{ github.repository_owner }}/fika-debian12:${{ needs.prepare.outputs.spt_version }}
+            ghcr.io/${{ github.repository_owner }}/fika-debian12:${{ needs.build-spt.outputs.spt_version }}
 
       - name: Compress Build Artifact
         id: compress_artifact
         run: |
-          artifact_name=spt-${{ needs.prepare.outputs.spt_version }}-fika-${{ needs.prepare.outputs.tag_fika }}.tgz
+          artifact_name=spt-${{ needs.build-spt.outputs.spt_version }}-fika-${{ needs.build-spt.outputs.tag_fika }}.tgz
           tar -czvf ${{ steps.clear-directory.outputs.release_path }}/$artifact_name ./SPT
 
           echo "artifact_name=$artifact_name" >> "$GITHUB_OUTPUT"
@@ -367,7 +369,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GH_PAT_FOR_RELEASE }}
         with:
           tag_name: ${{ github.ref_name }}  # use trigger tag name
-          release_name: ${{ needs.prepare.outputs.spt_version }}
+          release_name: ${{ needs.build-spt.outputs.spt_version }}
           draft: false
           prerelease: false
 
@@ -390,4 +392,3 @@ jobs:
           asset_path: ${{ steps.clear-directory.outputs.release_path }}/${{ steps.compress_artifact.outputs.artifact_name }}  # upload artifact
           asset_name: ${{ steps.compress_artifact.outputs.artifact_name }}
           asset_content_type: application/gzip
-
