@@ -145,7 +145,7 @@ jobs:
         working-directory: ${{ needs.prepare.outputs.build_path_spt }}
 
       - name: Upload SPT Server Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: spt-server-artifact
           path: ${{ needs.prepare.outputs.build_path_spt }}/target
@@ -191,7 +191,7 @@ jobs:
         working-directory: ${{ needs.prepare.outputs.build_path_fika_root }}
 
       - name: Set up .NET For Fika Server
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '9.0.x'
           cache: true
@@ -215,7 +215,7 @@ jobs:
         working-directory: ${{ needs.prepare.outputs.build_path_fika_server }}
 
       - name: Upload Fika Server Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fika-server-artifact
           path: ${{ needs.prepare.outputs.build_path_fika_server }}/target
@@ -223,7 +223,7 @@ jobs:
           if-no-files-found: error
 
       - name: Set up .NET For Fika Plugin
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '9.0.x'
           cache: true
@@ -252,7 +252,7 @@ jobs:
         working-directory: ${{ needs.prepare.outputs.build_path_fika_plugin }}
 
       - name: Upload Fika Plugin Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fika-plugin-artifact
           path: ${{ needs.prepare.outputs.build_path_fika_plugin }}/target
@@ -282,19 +282,19 @@ jobs:
         working-directory: ${{ github.workspace }}
 
       - name: Download SPT Server Artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: spt-server-artifact
           path: ${{ steps.clear-directory.outputs.release_path }}/SPT
 
       - name: Download Fika Server Artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: fika-server-artifact
-          path: ${{ steps.clear-directory.outputs.release_path }}/SPT
+          path: ${{ steps.clear-directory.outputs.release_path }}
 
       - name: Download Fika Plugin Artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: fika-plugin-artifact
           path: ${{ steps.clear-directory.outputs.release_path }}/SPT
@@ -304,6 +304,7 @@ jobs:
         shell: bash
         run: |
           if [ ! -d "${{ steps.clear-directory.outputs.release_path }}/SPT" ] || [ ! -d "${{ steps.clear-directory.outputs.release_path }}/SPT/user" ]; then
+            tree -L 2 ${{ steps.clear-directory.outputs.release_path }}
             echo "Error: Artifact not found."
             exit 1
           fi
