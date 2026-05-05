@@ -18,18 +18,25 @@ jobs:
     outputs:
       proceed: ${{ steps.check-existence.outputs.proceed }}
       repo_spt: ${{ steps.check-existence.outputs.repo_spt }}
-      repo_fika: ${{ steps.check-existence.outputs.repo_fika }}
+      repo_fika_server: ${{ steps.check-existence.outputs.repo_fika_server }}
+      repo_fika_plugin: ${{ steps.check-existence.outputs.repo_fika_plugin }}
       tag_spt: ${{ steps.check-existence.outputs.tag_spt }}
       tag_fika: ${{ steps.check-existence.outputs.tag_fika }}
       spt_version: ${{ steps.versions.outputs.spt_version }}
+      spt_commit: ${{ steps.versions.outputs.spt_commit }}
+      build_path_spt: ${{ github.workspace }}/build/spt-server
+      build_path_fika_root: ${{ github.workspace }}/build/fika
+      build_path_fika_server: ${{ github.workspace }}/build/fika/server
+      build_path_fika_plugin: ${{ github.workspace }}/build/fika/plugin
     steps:
       - name: Check Existence
         id: check-existence
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
-          SPTREPO: "https://github.com/zu-superman/spt-server.git"
-          FIKAREPO: "https://github.com/zu-superman/Fika-Server.git"
+          SPT_SERVER_REPO: "sp-tarkov/server-csharp"
+          FIKA_SERVER_REPO: "project-fika/Fika-Server-CSharp"
+          FIKA_PLUGIN_REPO: "project-fika/Fika-Plugin"
           SPTBUILDTAG: ${{ github.event.inputs.sptBuildTag }}
           FIKABUILDTAG: ${{ github.event.inputs.fikaBuildTag }}
         run: |
@@ -40,13 +47,13 @@ jobs:
 
           declare -A REPOS_TAG
 
-          REPOS_TAG[$SPTREPO]="$SPTBUILDTAG"
-          REPOS_TAG[$FIKAREPO]="$FIKABUILDTAG"
+          REPOS_TAG[$SPT_SERVER_REPO]="$SPTBUILDTAG"
+          REPOS_TAG[$FIKA_SERVER_REPO]="$FIKABUILDTAG"
           
           for REPO in "${!REPOS_TAG[@]}"; do
             echo "Checking for tag $TAG in $REPO..."
             TAG=${REPOS_TAG[$REPO]}
-            if ! git ls-remote --tags $REPO $TAG | grep -q $TAG; then
+            if ! git ls-remote --tags "https://github.com/${REPO}.git" $TAG | grep -q $TAG; then
               echo "Tag $TAG not found in $REPO"
               PROCEED="false"
               break
@@ -55,8 +62,9 @@ jobs:
           echo "proceed=$PROCEED" >> $GITHUB_OUTPUT
 
           if [ "$PROCEED" = "true" ]; then
-            echo "repo_spt=$SPTREPO" >> $GITHUB_OUTPUT
-            echo "repo_fika=$FIKAREPO" >> $GITHUB_OUTPUT
+            echo "repo_spt=$SPT_SERVER_REPO" >> $GITHUB_OUTPUT
+            echo "repo_fika_server=$FIKA_SERVER_REPO" >> $GITHUB_OUTPUT
+            echo "repo_fika_plugin=$FIKA_PLUGIN_REPO" >> $GITHUB_OUTPUT
             echo "tag_spt=$SPTBUILDTAG" >> $GITHUB_OUTPUT
             echo "tag_fika=$FIKABUILDTAG" >> $GITHUB_OUTPUT
           fi
@@ -72,105 +80,77 @@ jobs:
         id: versions
         shell: bash
         run: |
-          sudo apt update && sudo apt install -y jq
-          rm -rf /workspace/build/spt-server
-          sudo mkdir -p /workspace/build && sudo chown -R `whoami`:`groups | awk '{print $1}'` /workspace
-          git init /workspace/build/spt-server
-          cd /workspace/build/spt-server
-          git remote add origin ${{ steps.check-existence.outputs.repo_spt }}
+          # 初始化工作区
+          rm -rf ${{ github.workspace }}/build/spt-server
+          sudo mkdir -p ${{ github.workspace }}/build && sudo chown -R `whoami`:`groups | awk '{print $1}'` ${{ github.workspace }}
+          
+          # 初始化仓库
+          git init ${{ github.workspace }}/build/spt-server
+          cd ${{ github.workspace }}/build/spt-server
+          git remote add origin "https://github.com/${{ steps.check-existence.outputs.repo_spt }}.git"
+
+          # 配置仓库, 启用稀疏检出, 避免为了获取内部版本号而需要下载整个仓库
           git config core.sparseCheckout true
-          echo "project/assets/configs/core.json" >> .git/info/sparse-checkout
+          echo "Build.props" >> .git/info/sparse-checkout
+
           git fetch --depth=1 origin "${{ steps.check-existence.outputs.tag_spt }}"
           git checkout FETCH_HEAD
 
-          cd project/assets/configs
-          SPT_VERSION=$(jq -r '.sptVersion' core.json)
+          # 获取 SPT 内部版本
+          SPT_VERSION=$(sed -n 's/.*<SptVersion[^>]*>\([0-9]\+\.[0-9]\+\.[0-9]\+\)<\/SptVersion>.*/\1/p' Build.props)
+
+          # 获取SPT仓库的commit hash
+          SPT_COMMIT=$(git rev-parse HEAD)
 
           echo "spt_version=$SPT_VERSION" >> $GITHUB_OUTPUT
           echo "SPT version is $SPT_VERSION"
+
+          echo "spt_commit=$SPT_COMMIT" >> $GITHUB_OUTPUT
+          echo "SPT commit hash is $SPT_COMMIT"
       
   build-spt:
     needs: prepare
     if: needs.prepare.outputs.proceed == 'true'
     runs-on: ubuntu-latest
     outputs:
-      spt_server_version: ${{ steps.clone-spt-server.outputs.spt_version }}
-      spt_server_commit: ${{ steps.commit-hash.outputs.sp }}
-      node_version: ${{ steps.extract-node-version.outputs.node_version }}
+      spt_version: ${{ needs.prepare.outputs.spt_version }}
+    container:
+      image: refringe/spt-build-dotnet:2.1.0
     steps:
-      - name: Install Git LFS
-        run: |
-          curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | sudo bash
-          sudo apt-get install git-lfs
-
-      - name: Clone SPT Server
-        id: clone-spt-server
-        shell: bash
-        run: |
-          serverPath="/workspace/build/spt-server"
-
-          # Delete old remnants of the last build.
-          if [ -d "$serverPath" ]; then
-              rm -rf "$serverPath"
-          fi
-          sudo mkdir -p $serverPath
-          sudo chown -R `whoami`:`groups | awk '{print $1}'` $serverPath
-
-          TARGET="${{ needs.prepare.outputs.tag_spt }}"
-
-          echo "Cloning target: $TARGET"
-          git clone ${{ needs.prepare.outputs.repo_spt }} --branch "$TARGET" --depth 1 "$serverPath"
-
-          # Pull LFS files.
-          cd "$serverPath" || exit
-          git lfs install --local
-          git lfs pull
-
-          echo "spt_version=${{ needs.prepare.outputs.spt_version }}" >> $GITHUB_OUTPUT
-
-      - name: Output Commit Hash
-        id: commit-hash
-        shell: bash
-        run: echo "spt_server_commit=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-        working-directory: /workspace/build/spt-server
-
-      - name: Extract Node.js version
-        id: extract-node-version
-        env:
-          node_version: ""
-        run: |
-          node_version=$(cat /workspace/build/spt-server/project/.nvmrc)
-
-          if [ -z "$node_version" ]; then
-            echo "Error: Could't extract Node.js version."
-            exit 1
-          fi
-          echo "The node version required by spt server is: ${node-version}"
-          echo "node_version=$node_version" >> "$GITHUB_OUTPUT"
-
-      - name: Set up Node.js environment
-        uses: actions/setup-node@v4
+      - name: Checkout SPT Server
+        uses: actions/checkout@v6
         with:
-          node-version: "${{ steps.extract-node-version.outputs.node_version }}"
+          repository: ${{ needs.prepare.outputs.repo_spt }}
+          ref: ${{ needs.prepare.outputs.tag_spt }}
+          path: ${{ needs.prepare.outputs.build_path_spt }}
 
-      - name: Install dependencies
-        run: npm install
-        working-directory: /workspace/build/spt-server/project
-
+      - name: Pull SPT LFS
+        run: |
+          git lfs pull
+        working-directory: ${{ needs.prepare.outputs.build_path_spt }}
       - name: Build Spt Server
         shell: bash
         run: |
-          sed -i 's@127.0.0.1@0.0.0.0@g' ./assets/configs/http.json
-          sed -i 's@SPT.Server.exe@server@g' ./gulpfile.mjs
-          sed -i 's@const buildDir = "build/";@const buildDir = "target/";@g' ./gulpfile.mjs
-          npm run build:release --arch=x64 --platform=linux/amd64
-        working-directory: /workspace/build/spt-server/project
+          sed -i 's@127.0.0.1@0.0.0.0@g' ./Libraries/SPTarkov.Server.Assets/SPT_Data/configs/http.json
+          dotnet publish -f net9.0 ./SPTarkov.Server/SPTarkov.Server.csproj \
+          -c Release \
+          -r linux-x64 \
+          --self-contained false \
+          -p:SptBuildType=RELEASE \
+          -p:SptVersion=${{ needs.prepare.outputs.spt_version }} \
+          -p:SptBuildTime=$( date +%Y%m%d ) \
+          -p:SptBuildCommit=${{ needs.prepare.outputs.spt_commit }} \
+          -p:IsPublish=true
+          
+          mkdir -p ./target
+          tar -cf - -C ./SPTarkov.Server/bin/Release/net9.0/linux-x64/publish --exclude='*.pdb' . | tar -xf - -C ./target
+        working-directory: ${{ needs.prepare.outputs.build_path_spt }}
 
       - name: Upload SPT Server Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: spt-server-artifact
-          path: /workspace/build/spt-server/project/target
+          path: ${{ needs.prepare.outputs.build_path_spt }}/target
           retention-days: 1
           if-no-files-found: error
     
@@ -179,75 +159,106 @@ jobs:
     if: needs.prepare.outputs.proceed == 'true'
     runs-on: ubuntu-latest
     outputs:
-      fika_server_version: ${{ steps.clone-fika-server.outputs.fika_server_version }}
+      tag_fika: ${{ needs.prepare.outputs.tag_fika }}
       fika_server_commit: ${{ steps.commit-hash.outputs.fika_server_commit }}
-      node_version: ${{ steps.extract-node-version.outputs.node_version }}
+      fika_plugin_commit: ${{ steps.commit-hash.outputs.fika_plugin_commit }}
     steps:
-      - name: Clone Fika Server
-        id: clone-fika-server
-        shell: bash
+      - name: Reset Fika Target Directory
         run: |
-          serverPath="/workspace/build/fika-server"
-
-          # Delete old remnants of the last build.
-          if [ -d "$serverPath" ]; then
-              rm -rf "$serverPath"
+          if [ -d "${{ needs.prepare.outputs.build_path_fika_root }}" ]; then
+            rm -rf "${{ needs.prepare.outputs.build_path_fika_root }}"
           fi
-          sudo mkdir -p $serverPath
-          sudo chown -R `whoami`:`groups | awk '{print $1}'` $serverPath
+          sudo mkdir -p "${{ needs.prepare.outputs.build_path_fika_root }}"
+          sudo chown -R `whoami`:`groups | awk '{print $1}'` "${{ needs.prepare.outputs.build_path_fika_root }}"
 
-          TARGET="${{ needs.prepare.outputs.tag_fika }}"
+      - name: Checkout Fika Server
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ needs.prepare.outputs.repo_fika_server }}
+          ref: ${{ needs.prepare.outputs.tag_fika }}
+          path: ${{ needs.prepare.outputs.build_path_fika_server }}
 
-          echo "Cloning target: $TARGET"
-          git clone ${{ needs.prepare.outputs.repo_fika }} --branch "$TARGET" --depth 1 "$serverPath"
-          echo "fika_server_version=${{ needs.prepare.outputs.tag_fika }}" >> "$GITHUB_OUTPUT"
+      - name: Checkout Fika Plugin
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ needs.prepare.outputs.repo_fika_plugin }}
+          ref: ${{ needs.prepare.outputs.tag_fika }}
+          path: ${{ needs.prepare.outputs.build_path_fika_plugin }}
 
       - name: Output Commit Hash
         id: commit-hash
         shell: bash
-        run: echo "fika_server_commit=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-        working-directory: /workspace/build/fika-server
-
-      - name: Extract Node.js version
-        id: extract-node-version
-        env:
-          node_version: ""
         run: |
-          sudo apt update && sudo apt install -y jq
-          cd /workspace/build/fika-server
-          node_version=$(jq -r '.devDependencies["@types/node"]' package.json)
+          echo "fika_server_commit=$(git -C ./server rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          echo "fika_plugin_commit=$(git -C ./plugin rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+        working-directory: ${{ needs.prepare.outputs.build_path_fika_root }}
 
-          if [ -z "$node_version" ]; then
-            echo "Error: Node.js version not found in package.json"
-            exit 1
-          fi
-          echo "The node version required by fika server is: ${node_version}"
-          echo "node_version=$node_version" >> "$GITHUB_OUTPUT"
-
-      - name: Setup Node.js environment
-        uses: actions/setup-node@v4
+      - name: Set up .NET For Fika Server
+        uses: actions/setup-dotnet@v5
         with:
-          node-version: ${{ steps.extract-node-version.outputs.node_version }}
+          dotnet-version: '9.0.x'
+          cache: true
+          cache-dependency-path: "${{ needs.prepare.outputs.build_path_fika_server }}/FikaServer/packages.lock.json"
 
-      - name: Install dependencies
-        run: npm install
-        working-directory: /workspace/build/fika-server
-
+      - name: Restore Fika Server
+        run: |
+          cd ${{ needs.prepare.outputs.build_path_fika_server }}
+          dotnet restore FikaServer.slnx
+          
       - name: Build Fika Server
         shell: bash
         run: |
-          sudo apt update && sudo apt install -y unzip
-          npm run build
-          unzip dist/fika-server.zip -d dist
-          mkdir -p target
-          mv dist/user target/user
-        working-directory: /workspace/build/fika-server
-  
+          dotnet publish FikaServer/FikaServer.csproj --configuration Release --no-restore --output output/
+          target_path='target/SPT/user/mods/fika-server'
+          mkdir -p ${target_path}
+          cp output/FikaServer.dll ${target_path}/
+          cp output/FikaShared.dll ${target_path}/
+          cp -r FikaServer/Assets ${target_path}/assets
+          cp Licenses/* ${target_path}/
+        working-directory: ${{ needs.prepare.outputs.build_path_fika_server }}
+
       - name: Upload Fika Server Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fika-server-artifact
-          path: /workspace/build/fika-server/target
+          path: ${{ needs.prepare.outputs.build_path_fika_server }}/target
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Set up .NET For Fika Plugin
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '9.0.x'
+          cache: true
+          cache-dependency-path: "${{ needs.prepare.outputs.build_path_fika_plugin }}/Fika.Core/packages.lock.json"
+
+      - name: Restore Fika Plugin
+        run: |
+          cd ${{ needs.prepare.outputs.build_path_fika_plugin }}
+          dotnet restore Fika-Plugin.slnx
+  
+      - name: Build Fika Plugin
+        shell: bash
+        run: |
+          dotnet build Fika.Core/Fika.Core.csproj \
+            --configuration Release \
+            --no-restore \
+            --output output/ \
+            -p:Version=${{ needs.prepare.outputs.tag_fika }} \
+            -p:AssemblyVersion=${{ needs.prepare.outputs.tag_fika }} \
+            -p:InformationalVersion=${{ needs.prepare.outputs.tag_fika }}
+          
+          target_path='target/BepInEx/plugins/Fika'
+          mkdir -p ${target_path}
+          cp output/Fika.Core.dll ${target_path}/
+          cp Licenses/* ${target_path}/
+        working-directory: ${{ needs.prepare.outputs.build_path_fika_plugin }}
+
+      - name: Upload Fika Plugin Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: fika-plugin-artifact
+          path: ${{ needs.prepare.outputs.build_path_fika_plugin }}/target
           retention-days: 1
           if-no-files-found: error
     
@@ -256,61 +267,74 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       artifact_name: ${{ steps.compress_artifact.outputs.artifact_name }}
+      release_path: ${{ steps.clear-directory.outputs.release_path }}
     permissions:
       contents: read
       packages: write  # make sure can write
     steps:
       - name: Clear Directory
+        id: clear-directory
         shell: bash
         run: |
-          rm -rf ${{ github.workspace }}/release build
-          mkdir -p ${{ github.workspace }}/release
+          RELEASE_PATH=${{ github.workspace }}/release
+
+          rm -rf ${RELEASE_PATH} build
+          mkdir -p ${RELEASE_PATH}
+
+          echo "release_path=${RELEASE_PATH}" >> "$GITHUB_OUTPUT"
+        working-directory: ${{ github.workspace }}
 
       - name: Download SPT Server Artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: spt-server-artifact
-          path: ${{ github.workspace }}/release/aki-server
+          path: ${{ steps.clear-directory.outputs.release_path }}/SPT
 
       - name: Download Fika Server Artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: fika-server-artifact
-          path: ${{ github.workspace }}/release/aki-server
+          path: ${{ steps.clear-directory.outputs.release_path }}
+
+      - name: Download Fika Plugin Artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: fika-plugin-artifact
+          path: ${{ steps.clear-directory.outputs.release_path }}/SPT
 
       - name: Check artifacts isExist
         id: check_artifact
         shell: bash
         run: |
-          if [ ! -d "${{ github.workspace }}/release/aki-server" ] || [ ! -d "${{ github.workspace }}/release/aki-server/user" ]; then
+          if [ ! -d "${{ steps.clear-directory.outputs.release_path }}/SPT" ] || [ ! -d "${{ steps.clear-directory.outputs.release_path }}/SPT/user" ]; then
+            tree -L 2 ${{ steps.clear-directory.outputs.release_path }}
             echo "Error: Artifact not found."
             exit 1
           fi
-          ls -alhF ${{ github.workspace }}/release/aki-server
+          ls -alhF ${{ steps.clear-directory.outputs.release_path }}/SPT
 
       - name: Build Docker image
         run: |
-          cd ${{ github.workspace }}/release
-
           # create fika-start script
           cat <<EOF > fika-start
           #!/bin/sh
           mkdir -p /fika/logs
           cd /fika
-          /fika/server | awk '{ print strftime("%Y-%m-%d %H:%M:%S"), \$0; fflush(); }' | tee -a /fika/logs/fika.log
+          /fika/SPT.Server.Linux | ts "%Y-%m-%d %H:%M:%S" | tee -a /fika/logs/fika.log
           EOF
-          chmod +x ./aki-server/server fika-start
+          chmod +x ./SPT/SPT.Server.Linux fika-start
 
           # create Dockerfile
           cat <<EOF > Dockerfile
-          FROM alpine:latest
-          RUN apk update && apk add libstdc++ libgcc gcompat
-          COPY ./aki-server /fika
+          FROM mcr.microsoft.com/dotnet/aspnet:9.0
+          RUN apt update && apt install -y moreutils
+          COPY ./SPT /fika
           COPY fika-start /bin/fika-start
           CMD ["/bin/fika-start"]
           EOF
 
           cat Dockerfile  # print Dockerfile content to check
+        working-directory: ${{ steps.clear-directory.outputs.release_path }}
 
       - name: Login to GHCR
         uses: docker/login-action@v3
@@ -322,25 +346,23 @@ jobs:
       - name: Build and Push Docker Image to GHCR
         uses: docker/build-push-action@v5
         with:
-          context: ${{ github.workspace }}/release
-          file: ${{ github.workspace }}/release/Dockerfile
+          context: ${{ steps.clear-directory.outputs.release_path }}
+          file: ${{ steps.clear-directory.outputs.release_path }}/Dockerfile
           push: true
           tags: |
             ghcr.io/${{ github.repository_owner }}/spt-with-fika:latest
-            ghcr.io/${{ github.repository_owner }}/spt-with-fika:${{ needs.build-spt.outputs.spt_server_version }}
-            ghcr.io/${{ github.repository_owner }}/fika-alpine:latest
-            ghcr.io/${{ github.repository_owner }}/fika-alpine:${{ needs.build-spt.outputs.spt_server_version }}
-          build-args: |
-            NODE_ENV=production
+            ghcr.io/${{ github.repository_owner }}/spt-with-fika:${{ needs.build-spt.outputs.spt_version }}
+            ghcr.io/${{ github.repository_owner }}/fika-debian12:latest
+            ghcr.io/${{ github.repository_owner }}/fika-debian12:${{ needs.build-spt.outputs.spt_version }}
 
       - name: Compress Build Artifact
         id: compress_artifact
         run: |
-          cd ${{ github.workspace }}/release/aki-server
-          artifact_name=spt-v${{ needs.build-spt.outputs.spt_server_version }}-fika-${{ needs.build-fika.outputs.fika_server_version }}.tar.gz
-          tar -czvf ${{ github.workspace }}/release/$artifact_name .
+          artifact_name=spt-${{ needs.build-spt.outputs.spt_version }}-fika-${{ needs.build-fika.outputs.tag_fika }}.tgz
+          tar -czvf ${{ steps.clear-directory.outputs.release_path }}/$artifact_name ./SPT
 
           echo "artifact_name=$artifact_name" >> "$GITHUB_OUTPUT"
+        working-directory: ${{ steps.clear-directory.outputs.release_path }}
       
       - name: Create GitHub Release
         id: create_release
@@ -349,7 +371,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GH_PAT_FOR_RELEASE }}
         with:
           tag_name: ${{ github.ref_name }}  # use trigger tag name
-          release_name: ${{ needs.build-spt.outputs.spt_server_version }}
+          release_name: ${{ needs.build-spt.outputs.spt_version }}
           draft: false
           prerelease: false
 
@@ -359,7 +381,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GH_PAT_FOR_RELEASE }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}  # get upload url from step `create_release`
-          asset_path: ${{ github.workspace }}/release/Dockerfile  # upload Dockerfile as attachment
+          asset_path: ${{ steps.clear-directory.outputs.release_path }}/Dockerfile  # upload Dockerfile as attachment
           asset_name: Dockerfile
           asset_content_type: application/octet-stream
 
@@ -369,7 +391,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GH_PAT_FOR_RELEASE }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}  # get upload url from step `create_release`
-          asset_path: ${{ github.workspace }}/release/${{ steps.compress_artifact.outputs.artifact_name }}  # upload artifact
-          asset_name: ${{ steps.compress_artifact.outputs.artifact_name }}.tar.gz
+          asset_path: ${{ steps.clear-directory.outputs.release_path }}/${{ steps.compress_artifact.outputs.artifact_name }}  # upload artifact
+          asset_name: ${{ steps.compress_artifact.outputs.artifact_name }}
           asset_content_type: application/gzip
-
