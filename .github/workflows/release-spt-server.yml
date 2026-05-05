@@ -159,6 +159,7 @@ jobs:
     if: needs.prepare.outputs.proceed == 'true'
     runs-on: ubuntu-latest
     outputs:
+      tag_fika: ${{ needs.prepare.outputs.tag_fika }}
       fika_server_commit: ${{ steps.commit-hash.outputs.fika_server_commit }}
       fika_plugin_commit: ${{ steps.commit-hash.outputs.fika_plugin_commit }}
     steps:
@@ -357,10 +358,11 @@ jobs:
       - name: Compress Build Artifact
         id: compress_artifact
         run: |
-          artifact_name=spt-${{ needs.build-spt.outputs.spt_version }}-fika-${{ needs.build-spt.outputs.tag_fika }}.tgz
+          artifact_name=spt-${{ needs.build-spt.outputs.spt_version }}-fika-${{ needs.build-fika.outputs.tag_fika }}.tgz
           tar -czvf ${{ steps.clear-directory.outputs.release_path }}/$artifact_name ./SPT
 
           echo "artifact_name=$artifact_name" >> "$GITHUB_OUTPUT"
+        working-directory: ${{ steps.clear-directory.outputs.release_path }}
       
       - name: Create GitHub Release
         id: create_release
